@@ -106,51 +106,54 @@ class CtyDat(object):
 
     def __extract_call(self,test):
         """
-        Pulls out only the call sign from a cty.dat exception entry.
+        Pulls out only the call sign or prefix from a cty.dat entry.
         """
 
         if test[0] != '=':
-            call = None # Return None if a prefix entry.
+            call = test.upper()
 
         else:
             # Strip off the = and force upper case.
             call = test[1:].upper()
 
             # Remove zone information if present.
-            if '(' in call or '[' in call:
-                mo      = re.search('^([A-Z0-9\/]+)([\[\(].+)', call)
-                call    = mo.group(1)
+        if '(' in call or '[' in call:
+            mo      = re.search('^([A-Z0-9\/]+)([\[\(].+)', call)
+            call    = mo.group(1)
 
         return call
 
-
     def getdxcc(self, call):
+        call    = call.upper()
+
         matchchars  = 0
         goodzone    = None
         matchprefix = None
 
         perfect_match   = False
         cty_entry       = ''
+        match_list      = []
+
+        # Test callsign against all prefixes & count the number
+        # of characters that match.
         for mainprefix, tests in self.prefixes.items():
-            if perfect_match: break
             for test in tests:
-                if perfect_match: break
 
-                # First check if there is an exact match of the callsign
-                # in the cty.dat database.
-                if call.upper() == self.__extract_call(test):
-                    cty_entry       = test[1:]
-                    matchprefix     = mainprefix
-                    perfect_match   = True
+                pfx     = self.__extract_call(test)
 
-                # If no exact callsign match, then find the best prefix match.
-                elif call[0].upper() == test[0].upper():
-                    testlen = len(test) # Look for the longest prefix that matches
-                    if call[:testlen] == test[:testlen] and matchchars <= testlen:
-                        matchchars  = testlen
-                        cty_entry   = test
-                        matchprefix = mainprefix
+                match   = call.startswith(pfx)
+                if match is False:
+                    match_len   = 0
+                else:
+                    match_len   = len(pfx)
 
+                match_list.append( (match_len, mainprefix,test) )
+
+        # Sort the list & return the entry with the largest number of matching characters.
+        # Set matchprefix to None if there is no match.
+        match_list.sort(key=lambda x: x[0])
+        match_len, matchprefix, cty_entry = match_list[-1]
+        if match_len == 0: matchprefix = None
 
         try:
             mydxcc = self.dxcc[matchprefix]
@@ -160,7 +163,7 @@ class CtyDat(object):
         # CQ Zones in (), ITU Zones in []
         cty_entry_zones = None
         if '(' in cty_entry or '[' in cty_entry:
-            mo = re.search('^([A-Z0-9\/]+)([\[\(].+)', cty_entry)
+            mo = re.search('^([=A-Z0-9\/]+)([\[\(].+)', cty_entry)
             cty_entry_zones = mo.group(0)
                 
         if cty_entry_zones is not None:
