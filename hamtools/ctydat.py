@@ -44,7 +44,7 @@ class CtyDat(object):
                 # DXCC line
                 line=line.strip()
                 fields = [f.strip() for f in line.split(':')]
-                dxcc = dict(zip(self.fields, fields))
+                dxcc = dict(list(zip(self.fields, fields)))
                 mainprefix = dxcc['prefix']
                 self.dxcc[mainprefix] = dxcc
             else:
@@ -121,7 +121,7 @@ class CtyDat(object):
             call = prefix + 'AA'
 
         letter = call[0]
-        for mainprefix, tests in self.prefixes.iteritems():
+        for mainprefix, tests in self.prefixes.items():
             for test in tests:
                 testlen = len(test)
                 if letter != test[0]:

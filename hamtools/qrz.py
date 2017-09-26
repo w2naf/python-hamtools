@@ -16,7 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import httplib, urllib
+import http.client, urllib.request, urllib.parse, urllib.error
 from xml.dom import minidom
 import sys
 import os
@@ -52,9 +52,9 @@ class Callsign(object):
     def __getitem__(self, key):
         try:
             value = self.node.getElementsByTagName(key)[0].firstChild.data
-        except IndexError, e:
+        except IndexError as e:
             return None
-        if key in self.conversions.keys():
+        if key in list(self.conversions.keys()):
             value = self.conversions[key](value)
         return value
 
@@ -83,13 +83,13 @@ class Session(object):
             log.warning("maybe cache table exists?")
 
     def request(self, params):
-        hc = httplib.HTTPConnection("xml.qrz.com")
+        hc = http.client.HTTPConnection("xml.qrz.com")
         headers = {"Content-type": "application/x-www-form-urlencoded",
             "Accept": "text/plain"}
 
-        hc.request("POST", "/xml", urllib.urlencode(params), headers)
+        hc.request("POST", "/xml", urllib.parse.urlencode(params), headers)
         resp = hc.getresponse()
-        if resp.status != httplib.OK:
+        if resp.status != http.client.OK:
             raise Exception("Status %d" % resp.status)
         return resp.read()
 

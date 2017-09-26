@@ -16,9 +16,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import cStringIO as StringIO
+import io as StringIO
 from nose.tools import *
-import adif
+from . import adif
 from decimal import Decimal
 from datetime import datetime
 
@@ -38,25 +38,25 @@ def test_parse():
     flo = StringIO.StringIO(TEST_ADIF)
     reader = adif.Reader(flo)
     i = reader._lex()
-    eq_(i.next(), adif.Field(name='call', type='', body='AB9RN'))
-    eq_(i.next(), adif.Field(name='freq', type='', body='14.150'))
-    eq_(i.next(), adif.Field(name='mode', type='', body='SSB'))
-    eq_(i.next(), adif.Field(name='qso_date', type='', body='20120714'))
-    eq_(i.next(), adif.Field(name='time_on', type='', body='1200'))
-    eq_(i.next(), adif.Field(name='rst_sent', type='', body='59 '))
-    eq_(i.next(), adif.Field(name='rst_rcvd', type='', body='59 '))
-    eq_(i.next(), adif.Field(name='comment', type='', body='08'))
-    eq_(i.next(), adif.Field(name='eor', type='', body=''))
-    eq_(i.next(), adif.Field(name='call', type='', body='K4NNQ'))
+    eq_(next(i), adif.Field(name='call', type='', body='AB9RN'))
+    eq_(next(i), adif.Field(name='freq', type='', body='14.150'))
+    eq_(next(i), adif.Field(name='mode', type='', body='SSB'))
+    eq_(next(i), adif.Field(name='qso_date', type='', body='20120714'))
+    eq_(next(i), adif.Field(name='time_on', type='', body='1200'))
+    eq_(next(i), adif.Field(name='rst_sent', type='', body='59 '))
+    eq_(next(i), adif.Field(name='rst_rcvd', type='', body='59 '))
+    eq_(next(i), adif.Field(name='comment', type='', body='08'))
+    eq_(next(i), adif.Field(name='eor', type='', body=''))
+    eq_(next(i), adif.Field(name='call', type='', body='K4NNQ'))
 
 def test_iter_records():
     flo = StringIO.StringIO(TEST_ADIF)
     reader = adif.Reader(flo)
     i = iter(reader)
-    eq_(i.next(), {'call': 'AB9RN', 'freq': '14.150', 'mode': 'SSB', 'qso_date': '20120714',
+    eq_(next(i), {'call': 'AB9RN', 'freq': '14.150', 'mode': 'SSB', 'qso_date': '20120714',
                    'time_on': '1200', 'rst_sent': '59 ', 'rst_rcvd': '59 ',
                    'comment': '08',
-                   'app_datetime_on': datetime(2012, 07, 14, 12, 0)})
+                   'app_datetime_on': datetime(2012, 0o7, 14, 12, 0)})
 
 def test_version():
     flo = StringIO.StringIO(TEST_ADIF)

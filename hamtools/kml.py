@@ -38,8 +38,8 @@ class KML(object):
   # dirty subclassing ;-)
   def __getattr__(self, name):
     if not hasattr(self.root, name):
-      raise AttributeError, "%s instance has no attribute '%s'" %\
-                            (self.__class__.__name__, name)
+      raise AttributeError("%s instance has no attribute '%s'" %\
+                            (self.__class__.__name__, name))
     else:
       return getattr(self.root, name)
 
@@ -73,7 +73,7 @@ class KML(object):
     for d in dimensions:
       if d[1] != None:
         elt = self.xml.createElement(d[0])
-        elt.appendChild(self.xml.createTextNode(`d[1]`))
+        elt.appendChild(self.xml.createTextNode(repr(d[1])))
         icon.appendChild(elt)
     return icon    
     
@@ -81,7 +81,7 @@ class KML(object):
     istyle = self.xml.createElement("IconStyle")
     if scale != None:
       elt = self.xml.createElement("scale")
-      elt.appendChild(self.xml.createTextNode(`scale`))
+      elt.appendChild(self.xml.createTextNode(repr(scale)))
       istyle.appendChild(elt)
     if icon != None:
       istyle.appendChild(icon)
@@ -95,7 +95,7 @@ class KML(object):
     lstyle = self.xml.createElement("LabelStyle")
     if scale != None:
       elt = self.xml.createElement("scale")
-      elt.appendChild(self.xml.createTextNode(`scale`))
+      elt.appendChild(self.xml.createTextNode(repr(scale)))
       lstyle.appendChild(elt)
     if color:
       elt = self.xml.createElement("color")
@@ -166,15 +166,15 @@ class KML(object):
     pt.appendChild(elt)
     if range != None:
       elt = self.xml.createElement("range")
-      elt.appendChild(self.xml.createTextNode(`range`))
+      elt.appendChild(self.xml.createTextNode(repr(range)))
       pt.appendChild(elt)
     if tilt != None:
       elt = self.xml.createElement("tilt")
-      elt.appendChild(self.xml.createTextNode(`tilt`))
+      elt.appendChild(self.xml.createTextNode(repr(tilt)))
       pt.appendChild(elt)
     if heading != None:
       elt = self.xml.createElement("heading")
-      elt.appendChild(self.xml.createTextNode(`heading`))
+      elt.appendChild(self.xml.createTextNode(repr(heading)))
       pt.appendChild(elt)
     return pt
   
@@ -215,7 +215,7 @@ class KML(object):
       pm.appendChild(self.createLookAt(lat, lon, range, tilt, heading))
       
     if style:
-      if type(style) == str or type(style) == unicode:
+      if type(style) == str or type(style) == str:
         elt = self.xml.createElement("styleUrl")
         elt.appendChild(self.xml.createTextNode(style))
         pm.appendChild(elt)
@@ -358,4 +358,4 @@ class KML(object):
   #  root.appendChild(root)
 
 if __name__ == "__main__":
-  print "Syntax OK!"
+  print("Syntax OK!")

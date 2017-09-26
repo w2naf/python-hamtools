@@ -172,7 +172,7 @@ def format_header(header_text=' ', adif_ver=None):
 
 def format_record(record):
     fields = []
-    for k,v in record.iteritems():
+    for k,v in record.items():
         if k == 'app_datetime_on':
             continue
         fields.append("<%s:%d>%s" % (k, len(v), v))

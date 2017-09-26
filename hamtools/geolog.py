@@ -17,7 +17,7 @@
 #
 
 import argparse
-import ConfigParser
+import configparser
 import logging
 import os
 import sys
@@ -27,10 +27,10 @@ from pkg_resources import resource_stream
 
 import geojson as gj
 
-import adif
-from ctydat import CtyDat, InvalidDxcc
-import kml
-import qrz
+from . import adif
+from .ctydat import CtyDat, InvalidDxcc
+from . import kml
+from . import qrz
 
 log = logging.getLogger('geolog')
 #log.setLevel(logging.INFO)
@@ -58,7 +58,7 @@ class Log(object):
         self = Log()
         for line in logfile:
             if line.startswith("QSO"):
-                qso = dict(zip(CABRILLO_FIELDS, line.split()))
+                qso = dict(list(zip(CABRILLO_FIELDS, line.split())))
                 # Pygeojson just repr's numbers, which doesn't add .0 to
                 # floats, which makes them JSON ints, which QGIS won't allow to
                 # use for a graduated scale.
@@ -95,10 +95,10 @@ class Log(object):
         except NullLoc:
             log.warning("QRZ lookup failed for %s, no location data" % self.callsign)
             raise
-        except qrz.NotFound, e:
+        except qrz.NotFound as e:
             log.warning("QRZ lookup failed for %s, not found" % self.callsign)
             raise
-        except Exception, e:
+        except Exception as e:
             log.warning("QRZ lookup failed for %s" % self.callsign, exc_info=True)
             raise
 
@@ -113,7 +113,7 @@ class Log(object):
                 if None in (rec['lat'], rec['lon']):
                     raise NullLoc()
                 qso['lat'], qso['lon'] = rec['lat'], rec['lon']
-            except Exception, e:
+            except Exception as e:
                 if isinstance(e, qrz.NotFound):
                     log.warning("QRZ lookup failed for %s, not found" % qso['call'])
                 elif isinstance(e, NullLoc):
@@ -169,7 +169,7 @@ class Log(object):
 
 def geolog(logfilepath, outfile, username, password, cachepath, ctydatflo):
     with open(logfilepath) as logfile:
-        line = logfile.next()
+        line = next(logfile)
 
     with open(logfilepath) as logfile:
         if line.startswith('START-OF-LOG'):
@@ -220,34 +220,34 @@ created: "foo/bar_points.geojson", "foo/bar_lines.geojson", and "foo/bar.kml"
         help='Turn on additional output', default=False)
     args = parser.parse_args(argv[1:])
 
-    cfg = ConfigParser.SafeConfigParser()
+    cfg = configparser.SafeConfigParser()
 
     cfg.read(args.cfg)
 
     try:
         un = cfg.get('qrz', 'username')
-    except ConfigParser.Error:
-        un = raw_input("QRZ.com user name:")
+    except configparser.Error:
+        un = input("QRZ.com user name:")
 
     try:
         pw = cfg.get('qrz', 'password')
-    except ConfigParser.Error:
-        pw = raw_input("QRZ.com password (not stored):")
+    except configparser.Error:
+        pw = input("QRZ.com password (not stored):")
 
     try:
         cachepath = cfg.get('qrz', 'cachepath')
-    except ConfigParser.Error:
+    except configparser.Error:
         cachepath = CACHEPATH
 
     try:
         cachepath = cfg.get('qrz', 'cachepath')
-    except ConfigParser.Error:
+    except configparser.Error:
         cachepath = CACHEPATH
 
     try:
         ctydatpath = cfg.get('geolog', 'cachepath')
         ctydatflo = open(ctydatpath)
-    except ConfigParser.Error:
+    except configparser.Error:
         ctydatflo = resource_stream(__name__, "ctydat/cty.dat")
 
     log.info("QRZ cache: %s" % cachepath)
