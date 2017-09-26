@@ -124,6 +124,17 @@ class CtyDat(object):
         return call
 
     def getdxcc(self, call):
+        """
+        Returns DXCC information from cty.dat for a given call sign or prefix.
+        The best match is provided.
+        Only the beginning of a call sign/prefix is evaluated; suffixes are ignored,
+        unless an exact match exception is defined in your cty.dat.
+
+        All searches are case insensitive.
+
+        If no match is found, an empty dictionary is returned.
+        """
+
         call    = call.upper()
 
         matchchars  = 0
@@ -158,7 +169,7 @@ class CtyDat(object):
         try:
             mydxcc = self.dxcc[matchprefix]
         except KeyError:
-            raise InvalidDxcc(matchprefix)
+            return {}
 
         # CQ Zones in (), ITU Zones in []
         cty_entry_zones = None
