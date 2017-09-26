@@ -104,58 +104,89 @@ class CtyDat(object):
                 prefix = a + '0'
         return prefix
 
+    def __extract_call(self,test):
+        """
+        Pulls out only the call sign from a cty.dat exception entry.
+        """
+
+        if test[0] != '=':
+            call = None # Return None if a prefix entry.
+
+        else:
+            # Strip off the = and force upper case.
+            call = test[1:].upper()
+
+            # Remove zone information if present.
+            if '(' in call or '[' in call:
+                mo      = re.search('^([A-Z0-9\/]+)([\[\(].+)', call)
+                call    = mo.group(1)
+
+        return call
+
+
     def getdxcc(self, call):
-        matchchars = 0
-        goodzone = None
+        matchchars  = 0
+        goodzone    = None
         matchprefix = None
-        if re.search('(^OH/)|(/OH[1-9]?$)', call) is not None:
-            call = 'OH'
-        elif re.search('(^3D2R)|(^3D2.+\/R)', call) is not None:
-            call = '3D2RR'
-        elif re.search('^3D2C', call) is not None:
-            call = '3D2CR'
-        elif '/' in call:
-            prefix = self.getwpx(call)
-            if prefix is None:
-                prefix = 'QQ'
-            call = prefix + 'AA'
 
-        letter = call[0]
+        perfect_match   = False
+        cty_entry       = ''
         for mainprefix, tests in self.prefixes.items():
+            if perfect_match: break
             for test in tests:
-                testlen = len(test)
-                if letter != test[0]:
-                    continue
-                zones = ''
-                if testlen > 5 and '(' in test or '[' in test:
-                    mo = re.search('^([A-Z0-9\/]+)([\[\(].+)', test)
-                    if mo.group(1) is not None:
-                        zones += mo.group(1)
-                    testlen = len(mo.group(0))
+                if perfect_match: break
 
-                if call[:testlen] == test[:testlen] and matchchars <= testlen:
-                    matchchars = testlen
-                    matchprefix = mainprefix
-                    goodzone = zones
+                # First check if there is an exact match of the callsign
+                # in the cty.dat database.
+                if call.upper() == self.__extract_call(test):
+                    cty_entry       = test[1:]
+                    matchprefix     = mainprefix
+                    perfect_match   = True
+
+                # If no exact callsign match, then find the best prefix match.
+                elif call[0].upper() == test[0].upper():
+                    testlen = len(test) # Look for the longest prefix that matches
+                    if call[:testlen] == test[:testlen] and matchchars <= testlen:
+                        matchchars  = testlen
+                        cty_entry   = test
+                        matchprefix = mainprefix
+
 
         try:
             mydxcc = self.dxcc[matchprefix]
         except KeyError:
             raise InvalidDxcc(matchprefix)
 
-        if goodzone is not None:
-            mo = re.search('\((\d+)\)', goodzone)
+        # CQ Zones in (), ITU Zones in []
+        cty_entry_zones = None
+        if '(' in cty_entry or '[' in cty_entry:
+            mo = re.search('^([A-Z0-9\/]+)([\[\(].+)', cty_entry)
+            cty_entry_zones = mo.group(0)
+                
+        if cty_entry_zones is not None:
+            mo = re.search('\((\d+)\)', cty_entry_zones)
             if mo is not None:
-                mydxcc['cq'] = mo.group(0)
-            mo = re.search('\[(\d+)\]', goodzone)
+                mydxcc['cq'] = mo.group(0)[1:-1]
+            mo = re.search('\[(\d+)\]', cty_entry_zones)
             if mo is not None:
-                mydxcc['itu'] = mo.group(0)
+                mydxcc['itu'] = mo.group(0)[1:-1]
+
+        # Convert to strings to numbers
+        # Floats
+        keys = ['utcoff', 'lat', 'lon']
+        for key in keys:
+            mydxcc[key] = float(mydxcc[key])
+
+        # Ints
+        keys = ['cq', 'itu']
+        for key in keys:
+            mydxcc[key] = int(mydxcc[key])
 
         if mydxcc['prefix'].startswith('*'):
             if (mydxcc['prefix'] == '*TA1'):  mydxcc['prefix'] = "TA"  # Turkey
             if (mydxcc['prefix'] == '*4U1V'): mydxcc['prefix'] = "OE"  # 4U1VIC is in OE..
             if (mydxcc['prefix'] == '*GM/s'): mydxcc['prefix'] = "GM"  # Shetlands
-            if (mydxcc['prefix'] == '*IG9'):  mydxcc['prefix'] = "I"  # African Italy
+            if (mydxcc['prefix'] == '*IG10'):  mydxcc['prefix'] = "I"  # African Italy
             if (mydxcc['prefix'] == '*IT9'):  mydxcc['prefix'] = "I"  # Sicily
             if (mydxcc['prefix'] == '*JW/b'): mydxcc['prefix'] = "JW"  # Bear Island
 
