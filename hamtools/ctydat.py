@@ -135,7 +135,10 @@ class CtyDat(object):
         If no match is found, an empty dictionary is returned.
         """
 
-        call    = call.upper()
+        try:
+            call    = call.upper()
+        except:
+            return {}
 
         matchchars  = 0
         goodzone    = None
