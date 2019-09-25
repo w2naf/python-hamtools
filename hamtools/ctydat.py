@@ -29,8 +29,8 @@ import re
 import pdb
 
 
-class InvalidDxcc(Exception):
-    pass
+class InvalidDxcc(Exception): pass
+class InvalidCallsign(Exception): pass
 
 
 class CtyDat(object):
@@ -56,11 +56,12 @@ class CtyDat(object):
 
     def getwpx(self, call):
         prefix = None
-        a,b,c = None, None, None
-        fields = call.split('/')
-        try: a,b,c = fields
+        a, b, c = None, None, None
+        fields = re.split('/+', call)
+        try:
+            a, b, c = fields
         except Exception:
-            try: a,b = fields
+            try: a, b = fields
             except Exception:
                 a = fields
 
@@ -70,7 +71,7 @@ class CtyDat(object):
                 a = None
 
         if b.isdigit():
-            raise Exception("invalid callsign %s" % call)
+            raise InvalidCallsign(call)
 
         if a is None and c is None:
             if re.search('\d', b) is not None:

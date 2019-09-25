@@ -23,9 +23,9 @@ import os
 import sqlite3
 import logging
 
-log = logging.getLogger('qrz')
+log = logging.getLogger(__name__)
 
-CACHEPATH = os.path.join(os.environ['HOME'], '.qrz_cache')
+CACHEPATH = os.path.join(os.environ.get('XDG_CACHE_HOME', os.environ['HOME']), '.qrz_cache')
 
 testSessionXML = """\
 <?xml version="1.0" ?> 
@@ -37,7 +37,16 @@ testSessionXML = """\
 </QRZDatabase>
 """
 
-class NotFound(Exception):
+class QrzError(Exception):
+    pass
+
+class NotFound(QrzError):
+    pass
+
+class CallMismatch(QrzError):
+    pass
+
+class QrzRequestError(QrzError):
     pass
 
 class Callsign(object):
@@ -59,16 +68,18 @@ class Callsign(object):
         return value
 
 class Session(object):
-    def __init__(self, user, passwd, cachepath=CACHEPATH):
+    def __init__(self, user=None, passwd=None, cachepath=CACHEPATH, key=None):
         # post http://xml.qrz.com/xml?username=user;password=passwdo
         # self.key = minidom parse key
         # check for alert or error
-        xml = self.request(dict(username=user, password=passwd))
-        log.debug(xml)
-        dom = minidom.parseString(xml)
-        session = dom.getElementsByTagName("Session")[0]
-        self.checkErr(session)
-        self.key = session.getElementsByTagName("Key")[0].firstChild.data
+        if not key:
+            xml = self.request(dict(username=user, password=passwd))
+            log.debug(xml)
+            dom = minidom.parseString(xml)
+            session = dom.getElementsByTagName("Session")[0]
+            self.checkErr(session)
+            key = session.getElementsByTagName("Key")[0].firstChild.data
+        self.key = key
         self.db = sqlite3.connect(cachepath)
         self.db.text_factory = str
         try:
@@ -86,33 +97,11 @@ class Session(object):
         hc = httplib.HTTPConnection("xml.qrz.com")
         headers = {"Content-type": "application/x-www-form-urlencoded",
             "Accept": "text/plain"}
-
         hc.request("POST", "/xml", urllib.urlencode(params), headers)
         resp = hc.getresponse()
         if resp.status != httplib.OK:
-            raise Exception("Status %d" % resp.status)
+            raise QrzRequestError("Status %d" % resp.status)
         return resp.read()
-
-    def checkErr(self, session):
-        errs = []
-        try:
-            errs = session.getElementsByTagName("Error")
-        except Exception:
-            pass
-        if len(errs) > 0:
-            err = errs[0].firstChild.data
-            if err.startswith("Not found"):
-                raise NotFound(err)
-            else:
-                raise Exception(err)
-
-        alert = None
-        try:
-            alert = session.getElementsByTagName("Alert")[0].firstChild.data
-        except Exception:
-            pass
-        if alert is not None:
-            raise Exception(alert)
 
 
     def qrz(self, callsign):
@@ -123,24 +112,32 @@ class Session(object):
         xml = c.execute('select val from dict where key == ?',
                                                     (callsign,)).fetchone()
         if not xml:
-            xml = self.request(dict(s=self.key,callsign=callsign))
             log.debug("miss %s" % callsign)
+            xml = self.request(dict(s=self.key,callsign=callsign))
         else:
+            log.debug("hit  %s" % callsign)
             miss = False
             xml = xml[0]
-            log.debug("hit  %s" % callsign)
         try:
             dom = minidom.parseString(xml)
-            session = dom.getElementsByTagName("Session")[0]
-            self.checkErr(session)
+            session = Callsign(dom.getElementsByTagName("Session")[0])
+            e = session['Error']
+            if e:
+                if not e.startswith("Not found"):
+                    raise QrzError(e)
             if miss:
                 self.db.execute("insert into dict values (?, ?)", (callsign, xml))
                 self.db.commit();
+            if e:
+                raise NotFound(callsign)
             callnode = dom.getElementsByTagName("Callsign")[0]
             data = Callsign(callnode)
             if data['call'].lower() != callsign.lower():
-                raise Exception("qrz callsign mismatch")
+                raise CallMismatch("Calls do not match", data['call'], callsign)
             return data
+        except QrzError, e:
+            log.warning("QRZ.com lookup failed: %s", repr(e))
+            raise
         except Exception:
             log.debug(xml)
             raise

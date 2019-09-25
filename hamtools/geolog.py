@@ -22,18 +22,19 @@ import logging
 import os
 import sys
 import traceback
-
 from pkg_resources import resource_stream
-
 import geojson as gj
+from hamtools import adif
+from hamtools.ctydat import CtyDat, InvalidDxcc, InvalidCallsign
+from hamtools import kml
+from hamtools import qrz
+import requests
+import requests_cache
 
-import adif
-from ctydat import CtyDat, InvalidDxcc
-import kml
-import qrz
 
-log = logging.getLogger('geolog')
-#log.setLevel(logging.INFO)
+log = logging.getLogger(__name__)
+
+# log.setLevel(logging.INFO)
 
 # 1. Load log
 # 2. Georeference log
@@ -41,12 +42,92 @@ log = logging.getLogger('geolog')
 # 4. Output GeoJSON
 
 CABRILLO_FIELDS = ['header', 'freq', 'mode', 'date', 'time',
-    'from_call', 'sent_rst', 'sent_ex', 'call', 'receved_rst',
-    'received_ex']
+                   'from_call', 'sent_rst', 'sent_ex', 'call', 'receved_rst',
+                   'received_ex']
 
 CACHEPATH = os.path.join(os.environ['HOME'], '.qrz_cache')
 
-class NullLoc(Exception): pass
+
+class OperatorGeoRefFail(Exception): pass
+
+
+class GeoRefFail(Exception): pass
+
+
+class GeoRefError(Exception): pass
+
+
+class NullLoc(GeoRefError): pass
+
+
+class NotFound(GeoRefError): pass
+
+
+class QrzReferencer(object):
+    def __init__(self, session):
+        self.session = session
+
+    ## TODO memoize and cache
+    def reference(self, callsign):
+        """Returns lon, lat from QRZ"""
+        try:
+            rec = self.session.qrz(callsign)
+            if None in (rec['lat'], rec['lon']):
+                raise NullLoc(callsign)
+            lat, lon = rec['lat'], rec['lon']
+            log.debug("qrz rec %s" % rec)
+        except qrz.NotFound, e:
+            raise NotFound(callsign)
+        except qrz.QrzError, e:
+            raise GeoRefError(*e.args)
+        return lon, lat
+
+
+class CtyDatReferencer(object):
+    def __init__(self, ctydat):
+        self.ctydat = ctydat
+
+    def reference(self, callsign):
+        """Returns lon, lat from ctydat"""
+        try:
+            dxcc = self.ctydat.getdxcc(callsign)
+        except (InvalidDxcc, InvalidCallsign):
+            raise GeoRefError(callsign)
+        lat = float(dxcc['lat'])
+        lon = float(dxcc['lon']) * -1
+        return lon, lat
+
+
+class FCCReferencer(object):
+    PREFIXES = list('aknw')
+    CACHEPATH = os.path.join(os.environ.get('XDG_CACHE_HOME', os.environ['HOME']), '.callook_cache')
+    requests_cache.install_cache(CACHEPATH)
+    def reference(self, callsign):
+        if callsign[0].lower() not in self.PREFIXES:
+            raise NotFound(callsign)
+        r = requests.get("https://callook.info/%s/json" % callsign)
+        if r.status_code == 404:
+            raise NotFound(callsign)
+        if r.status_code != 200:
+            raise GeoRefError(r.status_code)
+        try:
+            data = r.json()
+        except ValueError:
+            raise GeoRefError('bad json')
+        if data['status'] != 'VALID':
+            raise GeoRefError('invalid')
+        raw_lon = data['location']['longitude']
+        raw_lat = data['location']['latitude']
+        if not raw_lon or not raw_lat:
+            raise GeoRefError("No location data")
+        try:
+            lon = float(data['location']['longitude'])
+            lat = float(data['location']['latitude'])
+            return lon, lat
+        except Exception, e:
+            log.debug(data)
+            raise
+
 
 class Log(object):
     def __init__(self):
@@ -63,7 +144,12 @@ class Log(object):
                 # floats, which makes them JSON ints, which QGIS won't allow to
                 # use for a graduated scale.
                 qso['time'] = float(qso['time'] + '.000000001')
-                qso['freq'] = float(qso['freq'] + '.000000001')
+                try:
+                    freq = float(qso['freq']) + 0.00000001
+                except ValueError:
+                    pass
+                else:
+                    qso['freq'] = freq
                 self.qsos.append(qso)
                 log.debug(qso)
             elif line.startswith("CALLSIGN:"):
@@ -74,77 +160,83 @@ class Log(object):
 
     @staticmethod
     def from_adif(logfile):
+        # TODO check for invalid ADIF file
         self = Log()
         log = adif.Reader(logfile)
         for qso in log:
-            try: del qso['app_datetime_on']
-            except KeyError: pass
-            try: del qso['app_datetime_off']
-            except KeyError: pass
+            try:
+                del qso['app_datetime_on']
+            except KeyError:
+                pass
+            try:
+                del qso['app_datetime_off']
+            except KeyError:
+                pass
             self.qsos.append(qso)
-        self.callsign = qso['operator']
+        if self.qsos:
+            qso = self.qsos[0]
+            self.callsign = qso.get('station_callsign', None)
+            if not self.callsign:
+                self.callsign = qso.get('operator', None)
         return self
 
+    def _georef(self, callsign):
+        for d in self.drivers:
+            try:
+                return d.reference(callsign)
+            except GeoRefError, e:
+                log.warning("%r failed on call %s: %s", d, callsign, e)
+        else:
+            raise GeoRefFail(callsign)
+
     def georeference(self, sess, ctydat):
+        drivers = self.drivers = []
+        sess and drivers.append(QrzReferencer(sess))
+        drivers.append(FCCReferencer())
+        ctydat and drivers.append(CtyDatReferencer(ctydat))
+
+        if not drivers:
+            raise Exception("No georef drivers")
+
+        if not self.callsign:
+            raise OperatorGeoRefFail("Unable to determine op callsign from log")
+
         try:
-            rec = sess.qrz(self.callsign)
-            if None in (rec['lat'], rec['lon']):
-                raise NullLoc()
-            self.lat, self.lon = rec['lat'], rec['lon']
-            log.debug("qrz rec %s" % rec)
-        except NullLoc:
-            log.warning("QRZ lookup failed for %s, no location data" % self.callsign)
-            raise
-        except qrz.NotFound, e:
-            log.warning("QRZ lookup failed for %s, not found" % self.callsign)
-            raise
-        except Exception, e:
-            log.warning("QRZ lookup failed for %s" % self.callsign, exc_info=True)
-            raise
+            self.lon, self.lat = self._georef(self.callsign)
+        except GeoRefFail:
+            raise OperatorGeoRefFail("Failed to georeference operator callsign", self.callsign)
 
         for qso in self.qsos:
-            qso['lat'], qso['lon'] = None, None
             try:
-                rec = sess.qrz(qso['call'])
-                log.debug("qrz rec %s" % rec)
-                if rec['call'] != qso['call']:
-                    log.warning("qrz %s != %s" % (rec['call'],
-                                    qso['call']))
-                if None in (rec['lat'], rec['lon']):
-                    raise NullLoc()
-                qso['lat'], qso['lon'] = rec['lat'], rec['lon']
-            except Exception, e:
-                if isinstance(e, qrz.NotFound):
-                    log.warning("QRZ lookup failed for %s, not found" % qso['call'])
-                elif isinstance(e, NullLoc):
-                    log.warning("QRZ lookup failed for %s, no location data" % qso['call'])
-                else:
-                    log.warning("QRZ lookup failed for %s" % qso['call'], exc_info=True)
-                try:
-                    dxcc = ctydat.getdxcc(qso['call'])
-                    qso['lat'] = float(dxcc['lat'])
-                    qso['lon'] = float(dxcc['lon']) * -1
-                except Exception:
-                    log.warning("cty.dat lookup failed for %s" % qso['call'], exc_info=True)
-                    raise
+                qso['lon'], qso['lat'] = self._georef(qso['call'])
+            except GeoRefFail:
+                log.warning("Failed to georef call %s", qso['call'])
 
     def geojson_dumps(self, *args, **kwargs):
+        qth, pointsFC, linesFC = self.geojson()
+        r = dict(qth=qth, pointsFC=pointsFC, linesFC=linesFC)
+        return gj.dumps(r)
+
+    def geojson(self):
+        qth = gj.Feature(geometry=gj.Point((self.lon, self.lat)))
         points = []
         lines = []
         for qso in self.qsos:
-            point = gj.Point((qso['lon'], qso['lat']))
+            point, line = None, None
+            coords = qso.get('lon', None), qso.get('lat', None)
+            if None not in coords:
+                point = gj.Point(coords)
+                line = gj.LineString([
+                    (self.lon, self.lat),
+                    coords
+                ])
             points.append(gj.Feature(geometry=point,
-                                 properties=qso))
-            line = gj.LineString([
-                        (self.lon, self.lat),
-                        (qso['lon'], qso['lat'])
-            ])
+                                     properties=qso))
             lines.append(gj.Feature(geometry=line,
-                                 properties=qso))
-        return (
-            gj.dumps(gj.FeatureCollection(points), *args, **kwargs),
-            gj.dumps(gj.FeatureCollection(lines), *args, **kwargs),
-        )
+                                    properties=qso))
+        pointsFC = gj.FeatureCollection(points)
+        linesFC = gj.FeatureCollection(lines)
+        return qth, pointsFC, linesFC
 
     def write_kml(self, file):
         dom = kml.KML()
@@ -166,6 +258,7 @@ class Log(object):
             callnode.removeChild(callnode.childNodes[1])
             folder.appendChild(callnode)
         dom.writepretty(file)
+
 
 def geolog(logfilepath, outfile, username, password, cachepath, ctydatflo):
     with open(logfilepath) as logfile:
@@ -202,22 +295,20 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv
 
-    logging.basicConfig(level=logging.INFO)
-
     parser = argparse.ArgumentParser(
         description=
-"""Read ham log and output GIS data for callsigns worked. Output files will be
+        """Read ham log and output GIS data for callsigns worked. Output files will be
 prefixed with output path. E.g. given "foo/bar", the following files will be
 created: "foo/bar_points.geojson", "foo/bar_lines.geojson", and "foo/bar.kml"
 """)
     parser.add_argument('infile', type=str,
-        help='Input log file (ADIF or Cabrillo)')
+                        help='Input log file (ADIF or Cabrillo)')
     parser.add_argument('outpath', type=str,
-        help='Output path prefix')
+                        help='Output path prefix')
     parser.add_argument('-c', '--cfg', type=str,
-        help='Config file path', default=os.path.join(os.environ['HOME'], '.geologrc'))
+                        help='Config file path', default=os.path.join(os.environ['HOME'], '.geologrc'))
     parser.add_argument('-v', '--verbose', type=bool,
-        help='Turn on additional output', default=False)
+                        help='Turn on additional output', default=False)
     args = parser.parse_args(argv[1:])
 
     cfg = ConfigParser.SafeConfigParser()
@@ -258,5 +349,5 @@ created: "foo/bar_points.geojson", "foo/bar_lines.geojson", and "foo/bar.kml"
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     sys.exit(main())
-
